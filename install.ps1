@@ -1,23 +1,23 @@
 <#
 .SYNOPSIS
-Widevine Content Decryption Module (CDM) kurucusu (Windows x64).
+Installs the latest Widevine Content Decryption Module (CDM) for a Chromium-based browser (Windows x64).
 
-Bu script, browser-widevine-installer reposunun en guncel release'ini (hep latest)
-indirir ve hedef tarayicinin User Data\WidevineCdm\<surum> klasorune kurar.
-Kod tamamen acik kaynak; isterseniz indirip elle de calistirabilirsiniz.
+This script always downloads the newest release from the browser-widevine-installer repository
+and installs it into the target browser's User Data\WidevineCdm\<version> folder.
+The source code is fully open; feel free to inspect it and run it manually if you prefer.
 
 .DESCRIPTION
-Kaynak: https://github.com/karayelxyz/browser-widevine-installer/releases/latest
-Yapi:   User Data\WidevineCdm\<surum>\manifest.json + _platform_specific\win_x64\widevinecdm.dll
+Source: https://github.com/karayelxyz/browser-widevine-installer/releases/latest
+Layout: User Data\WidevineCdm\<version>\manifest.json + _platform_specific\win_x64\widevinecdm.dll
 
 .PARAMETER UserDataPath
-Hedef tarayicinin User Data klasoru (ornek: C:\Users\murat\AppData\Local\imput\Helium\User Data)
+Path to the target browser's User Data folder (e.g. C:\Users\<user>\AppData\Local\imput\Helium\User Data)
 
 .PARAMETER NoPause
-Bitis'te tus beklemeyi atlar (otomasyon / CI icin).
+Skip the "press any key" prompt at the end (for automation / CI).
 
 .PARAMETER CleanOld
-WidevineCdm altindaki eski surum klasorlerini siler.
+Delete older Widevine version folders under WidevineCdm.
 #>
 
 param(
@@ -31,12 +31,12 @@ $ProgressPreference = 'SilentlyContinue'
 
 $repo = 'karayelxyz/browser-widevine-installer'
 
-# --- Hedef User Data klasorunu belirle ---
+# --- Resolve target User Data folder ---
 if (-not $UserDataPath -and $env:WIDEVINE_USERDATA) {
     $UserDataPath = $env:WIDEVINE_USERDATA
 }
 if (-not $UserDataPath) {
-    Write-Host "[HATA] Hedef belirtilmedi. -UserDataPath parametresiyle veya WIDEVINE_USERDATA ortam degiskeniyle verin." -ForegroundColor Red
+    Write-Host "[ERROR] No target specified. Provide -UserDataPath or set the WIDEVINE_USERDATA environment variable." -ForegroundColor Red
     return
 }
 
@@ -50,45 +50,45 @@ Write-Host "================================================" -ForegroundColor C
 Write-Host "      Widevine CDM Installer (win-x64)" -ForegroundColor White
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Hedef: $widevineBase" -ForegroundColor DarkGray
+Write-Host "  Target: $widevineBase" -ForegroundColor DarkGray
 Write-Host ""
 
 if (Test-Path $tempWork) { Remove-Item $tempWork -Recurse -Force }
 New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
 
 try {
-    # 1. En guncel release'i bul (hep latest indirilir)
-    Write-Host " [1/5] En guncel Widevine surumu araniyor..." -ForegroundColor Gray
+    # 1. Fetch the latest release (always the most current one)
+    Write-Host " [1/5] Looking up the latest Widevine release..." -ForegroundColor Gray
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest"
     $asset = $release.assets | Where-Object { $_.name -like 'widevine-win-x64-*.zip' } | Select-Object -First 1
-    if (-not $asset) { throw 'widevine-win-x64-*.zip asset bulunamadi!' }
+    if (-not $asset) { throw 'widevine-win-x64-*.zip asset not found!' }
     $version = $release.tag_name -replace '^widevine-', ''
-    Write-Host " [OK] En guncel surum: $version" -ForegroundColor Green
+    Write-Host " [OK] Latest version: $version" -ForegroundColor Green
 
-    # 2. Indir
-    Write-Host " [2/5] Indiriliyor..." -ForegroundColor Gray
+    # 2. Download
+    Write-Host " [2/5] Downloading..." -ForegroundColor Gray
     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath
-    Write-Host " [OK] $([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB indirildi" -ForegroundColor Green
+    Write-Host " [OK] $([math]::Round((Get-Item $zipPath).Length / 1MB, 1)) MB downloaded" -ForegroundColor Green
 
-    # 3. Paketi ac
-    Write-Host " [3/5] Paket aciliyor..." -ForegroundColor Gray
+    # 3. Extract the package
+    Write-Host " [3/5] Extracting package..." -ForegroundColor Gray
     Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
 
-    # 4. Dogrula ve kur
+    # 4. Verify and install
     $manifestFile = Get-ChildItem -Path $extractPath -Filter 'manifest.json' -Recurse | Select-Object -First 1
-    if (-not $manifestFile) { throw 'manifest.json bulunamadi!' }
+    if (-not $manifestFile) { throw 'manifest.json not found!' }
     $manifest = Get-Content $manifestFile.FullName -Raw | ConvertFrom-Json
-    if ($manifest.name -notlike '*Widevine*') { throw "Gecersiz paket: $($manifest.name)" }
+    if ($manifest.name -notlike '*Widevine*') { throw "Invalid package: $($manifest.name)" }
 
     $finalDest = Join-Path $widevineBase $manifest.version
     if (Test-Path $finalDest) {
-        Write-Host " [4/5] Mevcut surum temizleniyor: $($manifest.version)" -ForegroundColor Gray
+        Write-Host " [4/5] Removing existing version: $($manifest.version)" -ForegroundColor Gray
         Remove-Item $finalDest -Recurse -Force
     }
     New-Item -ItemType Directory -Path $finalDest -Force | Out-Null
     Copy-Item -Path "$($manifestFile.DirectoryName)\*" -Destination $finalDest -Recurse -Force
 
-    # 5. Eski surumleri temizle
+    # 5. Clean up older versions
     if ($CleanOld) {
         Get-ChildItem -Path $widevineBase -Directory -ErrorAction SilentlyContinue |
             Where-Object { $_.Name -ne $manifest.version } |
@@ -96,26 +96,26 @@ try {
     }
 
     $dll = Join-Path $finalDest '_platform_specific\win_x64\widevinecdm.dll'
-    if (-not (Test-Path $dll)) { throw "widevinecdm.dll bulunamadi: $dll" }
+    if (-not (Test-Path $dll)) { throw "widevinecdm.dll not found: $dll" }
 
     Write-Host ""
     Write-Host "----------------------------------------------" -ForegroundColor Gray
-    Write-Host " [BASARILI] Widevine kuruldu!" -ForegroundColor Green
-    Write-Host "  Surum: $($manifest.version)" -ForegroundColor White
-    Write-Host "  Yol:   $finalDest" -ForegroundColor DarkGray
+    Write-Host " [SUCCESS] Widevine installed!" -ForegroundColor Green
+    Write-Host "  Version: $($manifest.version)" -ForegroundColor White
+    Write-Host "  Path:    $finalDest" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Tarayiciyi yeniden baslatin ve chrome://components adresinde" -ForegroundColor DarkGray
-    Write-Host "  'Widevine Content Decryption Module' surumunu kontrol edin." -ForegroundColor DarkGray
+    Write-Host "  Restart the browser and check chrome://components to verify the" -ForegroundColor DarkGray
+    Write-Host "  'Widevine Content Decryption Module' version." -ForegroundColor DarkGray
 
 } catch {
     Write-Host ""
-    Write-Host " [HATA] $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host " [ERROR] $($_.Exception.Message)" -ForegroundColor Red
 } finally {
     if (Test-Path $tempWork) { Remove-Item $tempWork -Recurse -Force }
 }
 
 if (-not $NoPause -and -not [Console]::IsInputRedirected) {
     Write-Host ""
-    Write-Host " Devam etmek icin bir tusa basin..." -ForegroundColor Cyan
+    Write-Host " Press any key to exit..." -ForegroundColor Cyan
     $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
 }

@@ -21,7 +21,7 @@ jobs:
           Write-Host "Chrome stable: $v"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "CHROME_VERSION=$v"
 
-      - name: Download and package Widevine from Google component updater
+      - name: Fetch Widevine package from Google component updater
         id: widevine
         shell: powershell
         run: |
@@ -32,13 +32,43 @@ jobs:
           if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
           New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 
-          # Google component updater (Chrome/Edge'in kullandigi resmi mekanizma)
-          $crxUrl = "https://clients2.google.com/service/update2/crx?response=redirect&os=win&arch=x64&os_arch=x86_64&nacl_arch=x86-64&prod=chrome&prodchannel=stable&prodversion=${{ steps.chrome.outputs.CHROME_VERSION }}&lang=en-US&acceptformat=crx2,crx3&x=id%3Doimompecagnajdejgnnjijobebaeigek%26installsource%3Dondemand%26uc"
-          Invoke-WebRequest -Uri $crxUrl -OutFile "$tmp\widevine.crx"
-          Write-Host "Downloaded: $((Get-Item "$tmp\widevine.crx").Length / 1MB) MB"
+          $chromeVer = "${{ steps.chrome.outputs.CHROME_VERSION }}"
 
-          # CRX3 basligini at: ZIP imzasini (PK\x03\x04) bul, oncesini kes
-          $bytes = [System.IO.File]::ReadAllBytes("$tmp\widevine.crx")
+          # Omaha protocol v3.1 (the same mechanism Chrome/Edge use to update Widevine)
+          $body = @{
+            request = @{
+              '@os' = 'win'; '@updater' = 'chrome'; 'acceptformat' = 'crx2,crx3'
+              app = @(@{ appid = 'oimompecagnajdejgnnjijobebaeigek'; enabled = $true; ping = @{ r = -2 }; updatecheck = @{}; version = '0.0.0.0' })
+              arch = 'x64'; dedup = 'cr'; domainjoined = $false
+              hw = @{ avx = 1; physmemory = 16; sse = 1; sse2 = 1; sse3 = 1; sse41 = 1; sse42 = 1; ssse3 = 1 }
+              lang = 'en-US'; nacl_arch = 'x86-64'
+              os = @{ arch = 'x86_64'; platform = 'Windows'; version = '10.0.26100.0' }
+              prod = 'Chrome'; prodchannel = 'stable'; prodversion = $chromeVer; protocol = '3.1'
+              requestid = '{7cf0f01e-3f0f-4f10-9b28-8ddddddd0001}'; sessionid = '{7cf0f01e-3f0f-4f10-9b28-8ddddddd0002}'
+              updaterchannel = 'stable'; updaterversion = $chromeVer
+            }
+          } | ConvertTo-Json -Depth 6
+
+          $resp = Invoke-RestMethod -Method Post -Uri "https://update.googleapis.com/service/update2/json" -ContentType 'application/json' -Body $body
+          $uc = $resp.response.app[0].updatecheck
+          if ($uc.status -ne 'ok') { throw "Update check failed: $($uc.status)" }
+
+          $ver = $uc.manifest.version
+          $codebase = $uc.urls.url | Where-Object { $_.codebase -like 'https://*' } | Select-Object -First 1 -ExpandProperty codebase
+          $pkg = $uc.manifest.packages.package[0]
+          $pkgUrl = $codebase + $pkg.name
+
+          Write-Host "Widevine version: $ver"
+          Write-Host "Package: $($pkg.name) ($([math]::Round($pkg.size / 1MB, 1)) MB)"
+
+          Invoke-WebRequest -Uri $pkgUrl -OutFile "$tmp\widevine.crx3"
+
+          $hash = (Get-FileHash "$tmp\widevine.crx3" -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $pkg.hash_sha256.ToLower()) { throw "SHA256 mismatch: got $hash" }
+          Write-Host "SHA256 verified"
+
+          # Strip CRX3 header: locate the ZIP signature (PK\x03\x04) and cut everything before it
+          $bytes = [System.IO.File]::ReadAllBytes("$tmp\widevine.crx3")
           $idx = -1
           for ($i = 0; $i -lt $bytes.Length - 4; $i++) {
             if ($bytes[$i] -eq 0x50 -and $bytes[$i+1] -eq 0x4B -and $bytes[$i+2] -eq 0x03 -and $bytes[$i+3] -eq 0x04) { $idx = $i; break }
@@ -54,10 +84,7 @@ jobs:
           if ($manifest.name -notlike '*Widevine*') { throw "Not a Widevine package: $($manifest.name)" }
           if (-not (Test-Path "$tmp\extracted\_platform_specific\win_x64\widevinecdm.dll")) { throw 'widevinecdm.dll not found' }
 
-          $ver = $manifest.version
-          Write-Host "Widevine version: $ver"
-
-          # Hedef duzen: WidevineCdm\<version>\manifest.json + _platform_specific\...
+          # Target layout: WidevineCdm\<version>\manifest.json + _platform_specific\...
           $stage = "$tmp\stage"
           New-Item -ItemType Directory -Path "$stage\WidevineCdm\$ver" -Force | Out-Null
           Copy-Item -Path "$tmp\extracted\*" -Destination "$stage\WidevineCdm\$ver" -Recurse -Force
@@ -79,4 +106,6 @@ jobs:
           gh release create "widevine-$ver" "widevine-win-x64-$ver.zip" `
             --repo $env:GITHUB_REPOSITORY `
             --title "Widevine CDM $ver (win-x64)" `
-            --notes "Widevine Content Decryption Module $ver (Windows x64) - Google component updater uzerinden indirildi. Kurulum: zip'i tarayicinin User Data klasorune acin (WidevineCdm\<surum>\ duzeni hazir gelir) ve tarayiciyi yeniden baslatin."
+            --notes "Widevine Content Decryption Module $ver (Windows x64) downloaded from Google's component updater (Chrome distribution channel).
+
+Extract the zip into your browser's User Data folder (the WidevineCdm\<version>\ layout is included) and restart the browser."

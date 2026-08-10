@@ -1,45 +1,45 @@
 # browser-widevine-installer
 
-Widevine Content Decryption Module (CDM) — **doğrudan Google'dan** indirilip **Helium** ve **Ungoogled Chromium** tarayıcılarına kurulur.
+Downloads the Widevine Content Decryption Module (CDM) — **directly from Google** — and installs it for the **Helium** and **Ungoogled Chromium** browsers.
 
-## Neden buna ihtiyaç var?
+## Why is this needed?
 
-Bazı tarayıcılar (Helium, Ungoogled Chromium gibi) Widevine'ı paket içinde **göndermez**. Bu yüzden Netflix, Prime Video, Disney+ gibi DRM korumalı videolar oynatılmaz. Bu proje modülü doğrudan Google'ın resmi dağıtım kanalından (Chrome/Edge'in de kullandığı component updater) çekip tarayıcıya kurar.
+Some browsers (e.g. Helium, Ungoogled Chromium) do **not** ship Widevine. As a result, DRM-protected videos on Netflix, Prime Video, Disney+, etc. will not play. This project fetches the module from Google's official distribution channel (the same component updater Chrome/Edge use) and installs it into the browser.
 
-## Nasıl çalışıyor?
-
-```
-[1] Aylık otomatik workflow (GitHub Actions)
-    │
-    ├── Widevine CRX'i Google'dan indirir (sadece ~10 MB, üçüncü taraf repo YOK)
-    ├── Sürüm değişmemişse → DURUR (yeni release yok)
-    └── Sürüm güncelse  → release yayınlar: widevine-win-x64-<sürüm>.zip
-                            │
-[2] install.ps1 (kullanıcı tarafı) ── hep EN SON release'i çeker
-    │
-    └── Tarayıcının User Data\WidevineCdm\<sürüm>\ klasörüne kurar
-```
-
-Bağımlılık zinciri yalnızca **Google** — silinebilecek/bozulabilecek hiçbir üçüncü taraf repo yok.
-
-## Doğru dizin yapısı (önemli!)
-
-WidevineCdm klasörü, sürüm numarasına göre **bir alt klasör** gerektirir (manifest.json'daki `version` değeriyle birebir aynı). Yalnızca dosyaları üst klasöre atmak **çalışmaz**:
+## How it works
 
 ```
-✗ YANLIŞ (çalışmaz)                  ✓ DOĞRU (versiyonlu alt klasör)
-WidevineCdm/                        WidevineCdm/
-  ├── manifest.json                   └── 4.10.2934.0
-  └── _platform_specific                  ├── manifest.json
-      └── win_x64                          └── _platform_specific
-          ├── widevinecdm.dll                  └── win_x64
-          └── widevinecdm.dll.sig                  ├── widevinecdm.dll
-                                                   └── widevinecdm.dll.sig
+[1] Monthly automated workflow (GitHub Actions)
+    |
+    |-- Downloads the Widevine CRX from Google (only ~22 MB, NO third-party repo)
+    |-- If the version is unchanged --> STOPS (no new release)
+    '-- If the version is newer   --> publishes a release: widevine-win-x64-<version>.zip
+                                          |
+[2] install.ps1 (user side) -- always fetches the LATEST release
+    |
+    '-- Installs into the browser's User Data\WidevineCdm\<version>\ folder
 ```
 
-Bu projenin release zip'leri zaten doğru düzenle üretilir; script kurulumu otomatik halleder.
+The only dependency is **Google** — there is no third-party repository that could be deleted or break.
 
-## Kurulum
+## Correct directory layout (important!)
+
+The WidevineCdm folder requires a **child folder named after the exact version** (identical to the `version` value in manifest.json). Dropping the files directly into the parent folder **does not work**:
+
+```
+X WRONG (does not work)               V CORRECT (versioned child folder)
+WidevineCdm/                          WidevineCdm/
+  |-- manifest.json                     '-- 4.10.3050.0
+  '-- _platform_specific                    |-- manifest.json
+      '-- win_x64                          '-- _platform_specific
+          |-- widevinecdm.dll                  '-- win_x64
+          '-- widevinecdm.dll.sig                  |-- widevinecdm.dll
+                                                   '-- widevinecdm.dll.sig
+```
+
+The release zips from this project already use the correct layout; the installer handles everything automatically.
+
+## Installation
 
 ### Helium
 
@@ -53,39 +53,39 @@ irm https://raw.githubusercontent.com/karayelxyz/browser-widevine-installer/main
 irm https://raw.githubusercontent.com/karayelxyz/browser-widevine-installer/main/install-ungoogled-chromium.ps1 | iex
 ```
 
-> Chrome, Edge ve Brave **zaten** Widevine içerir — onlara gerek yok.
+> Chrome, Edge and Brave **already** include Widevine — no action needed for those.
 
-### Elle kurulum (güvenlik şeffaflığı)
+### Manual installation (security transparency)
 
-Güvenlik endişesi duyuyorsanız `irm | iex` kullanmayın. Önce script'i indirip **inceleyin**, sonra çalıştırın:
+If you have security concerns about `irm | iex`, download and **inspect** the script first, then run it manually:
 
 ```powershell
-# 1) Script'i indir ve aç (kodu okuyun!)
+# 1) Download and open the script (read the code!)
 Invoke-WebRequest https://raw.githubusercontent.com/karayelxyz/browser-widevine-installer/main/install.ps1 -OutFile install.ps1
 notepad install.ps1
 
-# 2) İstediğiniz tarayıcının User Data yolunu vererek çalıştırın
+# 2) Run it with your browser's User Data path
 .\install.ps1 -UserDataPath "$env:LOCALAPPDATA\imput\Helium\User Data"
 
-# 3) Opsiyonel: eski sürüm klasörlerini de temizlesin
+# 3) Optional: also clean up older version folders
 .\install.ps1 -UserDataPath "$env:LOCALAPPDATA\imput\Helium\User Data" -CleanOld
 ```
 
-Tüm script'ler bu repoda açık kaynaktır; her çalıştırmada **en güncel** Widevine indirilir.
+All scripts in this repository are open source; every run downloads the **most recent** Widevine.
 
-## Doğrulama
+## Verification
 
-1. Tarayıcıyı tamamen kapatıp yeniden başlatın.
-2. Adres çubuğuna `chrome://components` yazın.
-3. **Widevine Content Decryption Module** sürümü `0.0.0.0` değilse kurulum başarılı.
-4. Test: https://demo.castlabs.com → **DRM** etiketli videoları oynatmayı deneyin.
+1. Fully close and restart the browser.
+2. Type `chrome://components` in the address bar.
+3. If the **Widevine Content Decryption Module** version is not `0.0.0.0`, the install succeeded.
+4. Test: https://demo.castlabs.com — try playing a video tagged **DRM**.
 
-## Yapılandırma parametreleri (install.ps1)
+## install.ps1 parameters
 
-| Parametre | Açıklama |
+| Parameter | Description |
 |---|---|
-| `-UserDataPath` | Hedef tarayıcının User Data klasörü |
-| `-CleanOld` | Eski Widevine sürüm klasörlerini siler |
-| `-NoPause` | Bitişte tuş beklemeyi atlar (CI için) |
+| `-UserDataPath` | Path to the target browser's User Data folder |
+| `-CleanOld` | Deletes older Widevine version folders |
+| `-NoPause` | Skips the "press any key" prompt (for CI) |
 
-Ortam değişkeni `WIDEVINE_USERDATA` da `-UserDataPath` ile aynı görevi görür.
+The `WIDEVINE_USERDATA` environment variable works the same as `-UserDataPath`.
