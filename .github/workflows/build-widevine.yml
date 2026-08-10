@@ -1,0 +1,83 @@
+name: Build Widevine Release
+
+on:
+  schedule:
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Get current Chrome stable version
+        id: chrome
+        shell: powershell
+        run: |
+          $r = Invoke-RestMethod "https://chromiumdash.appspot.com/fetch_releases?channel=Stable&platform=Windows&num=1"
+          $v = $r[0].version
+          Write-Host "Chrome stable: $v"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "CHROME_VERSION=$v"
+
+      - name: Download and package Widevine from Google component updater
+        id: widevine
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+
+          $tmp = Join-Path $env:TEMP 'widevine-crx'
+          if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
+          New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+
+          # Google component updater (Chrome/Edge'in kullandigi resmi mekanizma)
+          $crxUrl = "https://clients2.google.com/service/update2/crx?response=redirect&os=win&arch=x64&os_arch=x86_64&nacl_arch=x86-64&prod=chrome&prodchannel=stable&prodversion=${{ steps.chrome.outputs.CHROME_VERSION }}&lang=en-US&acceptformat=crx2,crx3&x=id%3Doimompecagnajdejgnnjijobebaeigek%26installsource%3Dondemand%26uc"
+          Invoke-WebRequest -Uri $crxUrl -OutFile "$tmp\widevine.crx"
+          Write-Host "Downloaded: $((Get-Item "$tmp\widevine.crx").Length / 1MB) MB"
+
+          # CRX3 basligini at: ZIP imzasini (PK\x03\x04) bul, oncesini kes
+          $bytes = [System.IO.File]::ReadAllBytes("$tmp\widevine.crx")
+          $idx = -1
+          for ($i = 0; $i -lt $bytes.Length - 4; $i++) {
+            if ($bytes[$i] -eq 0x50 -and $bytes[$i+1] -eq 0x4B -and $bytes[$i+2] -eq 0x03 -and $bytes[$i+3] -eq 0x04) { $idx = $i; break }
+          }
+          if ($idx -lt 0) { throw 'ZIP signature not found in CRX' }
+          [System.IO.File]::WriteAllBytes("$tmp\widevine.zip", $bytes[$idx..($bytes.Length - 1)])
+
+          Expand-Archive -Path "$tmp\widevine.zip" -DestinationPath "$tmp\extracted" -Force
+
+          $manifestPath = "$tmp\extracted\manifest.json"
+          if (-not (Test-Path $manifestPath)) { throw 'manifest.json not found' }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.name -notlike '*Widevine*') { throw "Not a Widevine package: $($manifest.name)" }
+          if (-not (Test-Path "$tmp\extracted\_platform_specific\win_x64\widevinecdm.dll")) { throw 'widevinecdm.dll not found' }
+
+          $ver = $manifest.version
+          Write-Host "Widevine version: $ver"
+
+          # Hedef duzen: WidevineCdm\<version>\manifest.json + _platform_specific\...
+          $stage = "$tmp\stage"
+          New-Item -ItemType Directory -Path "$stage\WidevineCdm\$ver" -Force | Out-Null
+          Copy-Item -Path "$tmp\extracted\*" -Destination "$stage\WidevineCdm\$ver" -Recurse -Force
+          Compress-Archive -Path "$stage\WidevineCdm" -DestinationPath "$env:GITHUB_WORKSPACE\widevine-win-x64-$ver.zip" -CompressionLevel Optimal
+
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "WIDEVINE_VERSION=$ver"
+
+      - name: Create release (skip if version already released)
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ver = "${{ steps.widevine.outputs.WIDEVINE_VERSION }}"
+          gh release view "widevine-$ver" --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "SKIP: widevine-$ver already exists"
+            exit 0
+          }
+          gh release create "widevine-$ver" "widevine-win-x64-$ver.zip" `
+            --repo $env:GITHUB_REPOSITORY `
+            --title "Widevine CDM $ver (win-x64)" `
+            --notes "Widevine Content Decryption Module $ver (Windows x64) - Google component updater uzerinden indirildi.
+Kurulum: zip'i tarayicinin User Data klasorune acin (WidevineCdm\<surum>\ duzeni hazir gelir) ve tarayiciyi yeniden baslatin."
