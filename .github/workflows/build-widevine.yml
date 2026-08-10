@@ -106,6 +106,4 @@ jobs:
           gh release create "widevine-$ver" "widevine-win-x64-$ver.zip" `
             --repo $env:GITHUB_REPOSITORY `
             --title "Widevine CDM $ver (win-x64)" `
-            --notes "Widevine Content Decryption Module $ver (Windows x64) downloaded from Google's component updater (Chrome distribution channel).
-
-Extract the zip into your browser's User Data folder (the WidevineCdm\<version>\ layout is included) and restart the browser."
+            --notes "Widevine Content Decryption Module $ver (Windows x64) downloaded from Google's component updater (Chrome distribution channel). Extract the zip into your browser's User Data folder (the WidevineCdm\<version>\ layout is included) and restart the browser."
