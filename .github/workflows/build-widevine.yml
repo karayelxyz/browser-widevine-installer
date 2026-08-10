@@ -44,7 +44,7 @@ jobs:
             if ($bytes[$i] -eq 0x50 -and $bytes[$i+1] -eq 0x4B -and $bytes[$i+2] -eq 0x03 -and $bytes[$i+3] -eq 0x04) { $idx = $i; break }
           }
           if ($idx -lt 0) { throw 'ZIP signature not found in CRX' }
-          [System.IO.File]::WriteAllBytes("$tmp\widevine.zip", $bytes[$idx..($bytes.Length - 1)])
+          [System.IO.File]::WriteAllBytes("$tmp\widevine.zip", [byte[]]$bytes[$idx..($bytes.Length - 1)])
 
           Expand-Archive -Path "$tmp\widevine.zip" -DestinationPath "$tmp\extracted" -Force
 
@@ -79,5 +79,4 @@ jobs:
           gh release create "widevine-$ver" "widevine-win-x64-$ver.zip" `
             --repo $env:GITHUB_REPOSITORY `
             --title "Widevine CDM $ver (win-x64)" `
-            --notes "Widevine Content Decryption Module $ver (Windows x64) - Google component updater uzerinden indirildi.
-Kurulum: zip'i tarayicinin User Data klasorune acin (WidevineCdm\<surum>\ duzeni hazir gelir) ve tarayiciyi yeniden baslatin."
+            --notes "Widevine Content Decryption Module $ver (Windows x64) - Google component updater uzerinden indirildi. Kurulum: zip'i tarayicinin User Data klasorune acin (WidevineCdm\<surum>\ duzeni hazir gelir) ve tarayiciyi yeniden baslatin."
