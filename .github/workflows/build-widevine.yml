@@ -103,12 +103,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ver = "${{ steps.widevine.outputs.WIDEVINE_VERSION }}"
-          gh release view "widevine-$ver" --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) {
+
+          $exists = $false
+          try {
+            Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/tags/widevine-$ver" -ErrorAction Stop | Out-Null
+            $exists = $true
+          } catch {
+            $exists = $false
+          }
+
+          if ($exists) {
             Write-Host "SKIP: widevine-$ver already exists"
             exit 0
           }
-          gh release create "widevine-$ver" "widevine-win-x64-$ver.zip" `
-            --repo $env:GITHUB_REPOSITORY `
-            --title "Widevine CDM $ver (win-x64)" `
-            --notes "Widevine Content Decryption Module $ver (Windows x64) downloaded from Google's component updater (Chrome distribution channel). Extract the zip into your browser's User Data folder (the WidevineCdm\<version>\ layout is included) and restart the browser."
+
+          gh release create "widevine-$ver" "$env:GITHUB_WORKSPACE\widevine-win-x64-$ver.zip" --repo $env:GITHUB_REPOSITORY --title "Widevine CDM $ver (win-x64)" --notes "Widevine Content Decryption Module $ver (Windows x64) downloaded from Google's component updater (Chrome distribution channel). Extract the zip into your browser's User Data folder (the WidevineCdm\<version>\ layout is included) and restart the browser."
