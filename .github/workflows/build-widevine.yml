@@ -49,7 +49,12 @@ jobs:
             }
           } | ConvertTo-Json -Depth 6
 
-          $resp = Invoke-RestMethod -Method Post -Uri "https://update.googleapis.com/service/update2/json" -ContentType 'application/json' -Body $body
+          $raw = Invoke-RestMethod -Method Post -Uri "https://update.googleapis.com/service/update2/json" -ContentType 'application/json' -Body $body
+
+          # Strip the XSSI prefix (e.g. ")]}'") before parsing the JSON manually
+          $startIdx = $raw.IndexOf('{')
+          if ($startIdx -gt 0) { $raw = $raw.Substring($startIdx) }
+          $resp = $raw | ConvertFrom-Json
           $uc = $resp.response.app[0].updatecheck
           if ($uc.status -ne 'ok') { throw "Update check failed: $($uc.status)" }
 
